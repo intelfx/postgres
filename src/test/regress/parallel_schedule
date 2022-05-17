@@ -128,7 +128,7 @@ test: partition_join partition_prune reloptions hash_part indexing partition_agg
 # ----------
 # Another group of parallel tests (compression)
 # ----------
-test: compression compression_pglz
+test: compression compression_pglz compression_zstd
 
 # event_trigger depends on create_am and cannot run concurrently with
 # any test that runs DDL
