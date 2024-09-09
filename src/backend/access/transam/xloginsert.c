@@ -114,6 +114,13 @@ static uint8 curinsert_flags = 0;
 static XLogRecData hdr_rdt;
 static char *hdr_scratch = NULL;
 
+#ifdef USE_ZSTD
+/*
+ * Compression context for ZSTD, preallocated for performance
+ */
+static ZSTD_CCtx *zstd_cctx;
+#endif
+
 #define SizeOfXlogOrigin	(sizeof(RepOriginId) + sizeof(char))
 #define SizeOfXLogTransactionId	(sizeof(TransactionId) + sizeof(char))
 
@@ -973,16 +980,27 @@ XLogCompressBackupBlock(char *page, uint16 hole_offset, uint16 hole_length,
 #endif
 			break;
 
-		case WAL_COMPRESSION_ZSTD:
+		case WAL_COMPRESSION_ZSTD: {
 #ifdef USE_ZSTD
-			len = ZSTD_compress(dest, COMPRESS_BUFSIZE, source, orig_len,
-								ZSTD_CLEVEL_DEFAULT);
+			if (unlikely(zstd_cctx == NULL)) {
+				zstd_cctx = ZSTD_createCCtx();
+
+				if (unlikely(zstd_cctx == NULL))
+					ereport(ERROR,
+					        (errcode(ERRCODE_OUT_OF_MEMORY),
+					         errmsg("out of memory"),
+					         errdetail("Failed to allocate ZSTD context")));
+			}
+
+			len = ZSTD_compressCCtx(zstd_cctx, dest, COMPRESS_BUFSIZE,
+			                        source, orig_len, ZSTD_CLEVEL_DEFAULT);
 			if (ZSTD_isError(len))
 				len = -1;		/* failure */
 #else
 			elog(ERROR, "zstd is not supported by this build");
 #endif
 			break;
+		}
 
 		case WAL_COMPRESSION_NONE:
 			Assert(false);		/* cannot happen */

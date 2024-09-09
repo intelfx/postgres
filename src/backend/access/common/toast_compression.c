@@ -30,6 +30,13 @@
 /* GUC */
 int			default_toast_compression = TOAST_PGLZ_COMPRESSION;
 
+#ifdef USE_ZSTD
+/*
+ * Compression context for ZSTD, preallocated for performance
+ */
+static ZSTD_CCtx *zstd_cctx;
+#endif
+
 #define NO_METHOD_SUPPORT(method) \
 	ereport(ERROR, \
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED), \
@@ -269,6 +276,16 @@ zstd_compress_datum(const struct varlena *value)
 
 	valsize = VARSIZE_ANY_EXHDR(value);
 
+	if (unlikely(zstd_cctx == NULL)) {
+		zstd_cctx = ZSTD_createCCtx();
+
+		if (unlikely(zstd_cctx == NULL))
+			ereport(ERROR,
+			        (errcode(ERRCODE_OUT_OF_MEMORY),
+			         errmsg("out of memory"),
+			         errdetail("Failed to allocate ZSTD context")));
+	}
+
 	/*
 	 * Figure out the maximum possible size of the ZSTD output, add the bytes
 	 * that will be needed for varlena overhead, and allocate that amount.
@@ -276,9 +293,9 @@ zstd_compress_datum(const struct varlena *value)
 	max_size = ZSTD_compressBound(valsize);
 	tmp = (struct varlena *) palloc(max_size + VARHDRSZ_COMPRESSED);
 
-	len = ZSTD_compress((char *) tmp + VARHDRSZ_COMPRESSED,
-						max_size, VARDATA_ANY(value), valsize,
-						ZSTD_CLEVEL_DEFAULT);
+	len = ZSTD_compressCCtx(zstd_cctx, (char *) tmp + VARHDRSZ_COMPRESSED,
+	                        max_size, VARDATA_ANY(value), valsize,
+	                        ZSTD_CLEVEL_DEFAULT);
 	if (ZSTD_isError(len))
 		elog(ERROR, "zstd compression failed: %s",
 			 ZSTD_getErrorName(len));
