@@ -40,6 +40,7 @@
 #include "storage/bufmgr.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
+#include "utils/builtins.h"
 
 /*
  * Guess the maximum buffer size required to store a compressed version of
@@ -119,6 +120,7 @@ static char *hdr_scratch = NULL;
  * Compression context for ZSTD, preallocated for performance
  */
 static ZSTD_CCtx *zstd_cctx;
+static int zstd_clevel = 0;
 #endif
 
 #define SizeOfXlogOrigin	(sizeof(RepOriginId) + sizeof(char))
@@ -992,8 +994,45 @@ XLogCompressBackupBlock(char *page, uint16 hole_offset, uint16 hole_length,
 					         errdetail("Failed to allocate ZSTD context")));
 			}
 
+			/* XXX HACK */
+			if (unlikely(zstd_clevel == 0)) {
+				char *zstd_clevel_str = getenv("ZSTD_COMPRESSION_LEVEL");
+				int minCLevel = ZSTD_minCLevel(),
+				    defaultCLevel = ZSTD_defaultCLevel(),
+				    maxCLevel = ZSTD_maxCLevel();
+
+				if (zstd_clevel_str != NULL) {
+					zstd_clevel = pg_strtoint32(zstd_clevel_str);
+					if (zstd_clevel == 0) {
+						ereport(WARNING,
+						        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+						         errmsg("invalid $ZSTD_COMPRESSION_LEVEL"),
+						         errdetail("$ZSTD_COMPRESSION_LEVEL is not an integer, ignoring: %s",
+						                   zstd_clevel_str)));
+						zstd_clevel = defaultCLevel;
+					}
+					else if (zstd_clevel < minCLevel) {
+						ereport(WARNING,
+						        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+						         errmsg("invalid $ZSTD_COMPRESSION_LEVEL"),
+						         errdetail("$ZSTD_COMPRESSION_LEVEL is out of range, adjusting: %d < %d",
+						                   zstd_clevel, minCLevel)));
+						zstd_clevel = minCLevel;
+					} else if (zstd_clevel > maxCLevel) {
+						ereport(WARNING,
+						        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+						         errmsg("invalid $ZSTD_COMPRESSION_LEVEL"),
+						         errdetail("$ZSTD_COMPRESSION_LEVEL is out of range, adjusting: %d > %d",
+						                   zstd_clevel, maxCLevel)));
+						zstd_clevel = maxCLevel;
+					}
+				} else {
+					zstd_clevel = defaultCLevel;
+				}
+			}
+
 			len = ZSTD_compressCCtx(zstd_cctx, dest, COMPRESS_BUFSIZE,
-			                        source, orig_len, ZSTD_CLEVEL_DEFAULT);
+			                        source, orig_len, zstd_clevel);
 			if (ZSTD_isError(len))
 				len = -1;		/* failure */
 #else

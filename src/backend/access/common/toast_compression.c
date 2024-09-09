@@ -35,6 +35,7 @@ int			default_toast_compression = TOAST_PGLZ_COMPRESSION;
  * Compression context for ZSTD, preallocated for performance
  */
 static ZSTD_CCtx *zstd_cctx;
+static int zstd_clevel = 0;
 #endif
 
 #define NO_METHOD_SUPPORT(method) \
@@ -286,6 +287,43 @@ zstd_compress_datum(const struct varlena *value)
 			         errdetail("Failed to allocate ZSTD context")));
 	}
 
+	/* XXX HACK */
+	if (unlikely(zstd_clevel == 0)) {
+		char *zstd_clevel_str = getenv("ZSTD_COMPRESSION_LEVEL");
+		int minCLevel = ZSTD_minCLevel(),
+		    defaultCLevel = ZSTD_defaultCLevel(),
+		    maxCLevel = ZSTD_maxCLevel();
+
+		if (zstd_clevel_str != NULL) {
+			zstd_clevel = pg_strtoint32(zstd_clevel_str);
+			if (zstd_clevel == 0) {
+				ereport(WARNING,
+				        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+				         errmsg("invalid $ZSTD_COMPRESSION_LEVEL"),
+				         errdetail("$ZSTD_COMPRESSION_LEVEL is not an integer, ignoring: %s",
+				                   zstd_clevel_str)));
+				zstd_clevel = defaultCLevel;
+			}
+			else if (zstd_clevel < minCLevel) {
+				ereport(WARNING,
+				        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+				         errmsg("invalid $ZSTD_COMPRESSION_LEVEL"),
+				         errdetail("$ZSTD_COMPRESSION_LEVEL is out of range, adjusting: %d < %d",
+				                   zstd_clevel, minCLevel)));
+				zstd_clevel = minCLevel;
+			} else if (zstd_clevel > maxCLevel) {
+				ereport(WARNING,
+				        (errcode(ERRCODE_CONFIG_FILE_ERROR),
+				         errmsg("invalid $ZSTD_COMPRESSION_LEVEL"),
+				         errdetail("$ZSTD_COMPRESSION_LEVEL is out of range, adjusting: %d > %d",
+				                   zstd_clevel, maxCLevel)));
+				zstd_clevel = maxCLevel;
+			}
+		} else {
+			zstd_clevel = defaultCLevel;
+		}
+	}
+
 	/*
 	 * Figure out the maximum possible size of the ZSTD output, add the bytes
 	 * that will be needed for varlena overhead, and allocate that amount.
@@ -295,7 +333,7 @@ zstd_compress_datum(const struct varlena *value)
 
 	len = ZSTD_compressCCtx(zstd_cctx, (char *) tmp + VARHDRSZ_COMPRESSED,
 	                        max_size, VARDATA_ANY(value), valsize,
-	                        ZSTD_CLEVEL_DEFAULT);
+	                        zstd_clevel);
 	if (ZSTD_isError(len))
 		elog(ERROR, "zstd compression failed: %s",
 			 ZSTD_getErrorName(len));
