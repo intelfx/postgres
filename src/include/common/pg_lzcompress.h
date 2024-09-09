@@ -78,6 +78,13 @@ typedef struct PGLZ_Strategy
 extern PGDLLIMPORT const PGLZ_Strategy *const PGLZ_strategy_default;
 extern PGDLLIMPORT const PGLZ_Strategy *const PGLZ_strategy_always;
 
+/* ----------
+ * GUC variables
+ * ----------
+ */
+#ifdef USE_ZSTD
+extern PGDLLIMPORT int compression_zstd_level;
+#endif
 
 /* ----------
  * Global function declarations

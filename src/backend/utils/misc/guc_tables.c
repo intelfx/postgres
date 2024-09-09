@@ -25,6 +25,9 @@
 #ifdef HAVE_SYSLOG
 #include <syslog.h>
 #endif
+#ifdef USE_ZSTD
+#include <zstd.h>
+#endif
 
 #include "access/commit_ts.h"
 #include "access/gin.h"
@@ -45,6 +48,7 @@
 #include "commands/vacuum.h"
 #include "common/file_utils.h"
 #include "common/scram-common.h"
+#include "common/pg_lzcompress.h"
 #include "jit/jit.h"
 #include "libpq/auth.h"
 #include "libpq/libpq.h"
@@ -3653,6 +3657,16 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&scram_sha_256_iterations,
 		SCRAM_SHA_256_DEFAULT_ITERATIONS, 1, INT_MAX,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"compression_zstd_level", PGC_SUSET, UNGROUPED,
+		 gettext_noop("Selects the compression level used whenever zstd compression is invoked."),
+		 NULL
+		},
+		&compression_zstd_level,
+		ZSTD_CLEVEL_DEFAULT, INT_MIN, INT_MAX,
 		NULL, NULL, NULL
 	},
 

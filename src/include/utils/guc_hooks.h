@@ -181,4 +181,6 @@ extern bool check_synchronized_standby_slots(char **newval, void **extra,
 											 GucSource source);
 extern void assign_synchronized_standby_slots(const char *newval, void *extra);
 
+extern bool check_zstd_compression_level(int *newval, void **extra, GucSource source);
+
 #endif							/* GUC_HOOKS_H */

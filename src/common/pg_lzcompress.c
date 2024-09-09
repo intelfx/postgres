@@ -185,8 +185,31 @@
 
 #include <limits.h>
 
-#include "common/pg_lzcompress.h"
+#ifdef USE_ZSTD
+#include <zstd.h>
+#endif
 
+#include "common/pg_lzcompress.h"
+#include "utils/guc.h"
+
+/* GUC */
+#ifdef USE_ZSTD
+int compression_zstd_level = ZSTD_CLEVEL_DEFAULT;
+bool check_zstd_compression_level(int *newval, void **extra, GucSource source)
+{
+	const int minCLevel = ZSTD_minCLevel(),
+			  maxCLevel = ZSTD_maxCLevel(),
+			  defaultCLevel = ZSTD_defaultCLevel();
+
+	if (*newval == 0) {
+		*newval = defaultCLevel;
+	} else if (*newval < minCLevel)
+		*newval = minCLevel;
+	else if (*newval > maxCLevel)
+		*newval = maxCLevel;
+	return true;
+}
+#endif
 
 /* ----------
  * Local definitions
