@@ -9191,7 +9191,7 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
         (if <productname>PostgreSQL</productname> was compiled with
         <option>--with-lz4</option>) <literal>lz4</literal> and
         (if <productname>PostgreSQL</productname> was compiled with
-        <option>--with-zstd</option> <literal>zstd</literal>.
+        <option>--with-zstd</option>) <literal>zstd</literal>.
         The default is <literal>pglz</literal>.
        </para>
       </listitem>
