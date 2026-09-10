@@ -25,8 +25,11 @@ CREATE TABLE cmdata_zstd(f1 TEXT COMPRESSION zstd);
 INSERT INTO cmdata_zstd VALUES(repeat('1234567890', 1004));
 \d+ cmdata_zstd
 
--- verify stored compression method in the data
+-- verify stored compression method in the data.  A value this size stays
+-- inline, so the method comes out of the varlena header rather than a TOAST
+-- pointer.
 SELECT pg_column_compression(f1) FROM cmdata_zstd;
+SELECT pg_column_toast_chunk_id(f1) IS NULL AS inline FROM cmdata_zstd;
 
 -- decompress data slice
 SELECT SUBSTR(f1, 200, 5) FROM cmdata_pglz;
@@ -58,7 +61,7 @@ SELECT pg_column_compression(f1) FROM cmmove2;
 
 -- test externally stored compressed data
 CREATE OR REPLACE FUNCTION large_val_zstd() RETURNS TEXT LANGUAGE SQL AS
-'select array_agg(md5(g::text))::text from generate_series(1, 256) g';
+'select array_agg(fipshash(g::text))::text from generate_series(1, 256) g';
 CREATE TABLE cmdata2 (f1 text COMPRESSION zstd);
 INSERT INTO cmdata2 SELECT large_val_zstd() || repeat('a', 4000);
 SELECT pg_column_compression(f1) FROM cmdata2;
@@ -115,7 +118,7 @@ SELECT pg_column_compression(f1) FROM cmpart2;
 -- test expression index
 CREATE TABLE cmdata2 (f1 TEXT COMPRESSION pglz, f2 TEXT COMPRESSION zstd);
 CREATE UNIQUE INDEX idx1 ON cmdata2 ((f1 || f2));
-INSERT INTO cmdata2 VALUES((SELECT array_agg(md5(g::TEXT))::TEXT FROM
+INSERT INTO cmdata2 VALUES((SELECT array_agg(fipshash(g::TEXT))::TEXT FROM
 generate_series(1, 50) g), VERSION());
 
 SET default_toast_compression = 'pglz';
@@ -126,6 +129,20 @@ SELECT length(f1) FROM cmdata_zstd;
 SELECT length(f1) FROM cmmove1;
 SELECT length(f1) FROM cmmove2;
 SELECT length(f1) FROM cmmove3;
+
+-- An existing value keeps the method it was written with until something
+-- rewrites it: ALTER TABLE does not touch it, and neither does a table
+-- rewrite, which carries TOAST pointers over as they are.  An UPDATE does.
+CREATE TABLE cmlazy (f1 text COMPRESSION pglz);
+INSERT INTO cmlazy VALUES (repeat('123456789', 4004));
+SELECT pg_column_compression(f1) FROM cmlazy;
+ALTER TABLE cmlazy ALTER COLUMN f1 SET COMPRESSION zstd;
+SELECT pg_column_compression(f1) FROM cmlazy;
+VACUUM FULL cmlazy;
+SELECT pg_column_compression(f1) FROM cmlazy;
+UPDATE cmlazy SET f1 = f1 || '';
+SELECT pg_column_compression(f1) FROM cmlazy;
+SELECT length(f1) FROM cmlazy;
 
 -- compression_zstd_level: the accepted range comes from libzstd, so the
 -- detail of the range error is not stable across builds.
