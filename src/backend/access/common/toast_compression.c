@@ -31,9 +31,11 @@ int			default_toast_compression = TOAST_PGLZ_COMPRESSION;
 
 #ifdef USE_ZSTD
 /*
- * Compression context for ZSTD, preallocated for performance
+ * Compression and decompression contexts for ZSTD, preallocated for
+ * performance
  */
 static ZSTD_CCtx *zstd_cctx;
+static ZSTD_DCtx *zstd_dctx;
 #endif
 
 #define NO_METHOD_SUPPORT(method) \
@@ -370,10 +372,27 @@ zstd_decompress_datum_slice(const struct varlena *value, int32 slicelength)
 
 	ZSTD_inBuffer inBuf;
 	ZSTD_outBuffer outBuf;
-	ZSTD_DCtx *dctx = ZSTD_createDCtx();
+	size_t		ret;
 
-	if (dctx == NULL)
-		elog(ERROR, "could not create zstd decompression context");
+	if (unlikely(zstd_dctx == NULL)) {
+		zstd_dctx = ZSTD_createDCtx();
+
+		if (unlikely(zstd_dctx == NULL))
+			ereport(ERROR,
+			        (errcode(ERRCODE_OUT_OF_MEMORY),
+			         errmsg("out of memory"),
+			         errdetail("Failed to allocate ZSTD context")));
+	}
+
+	/*
+	 * Begin a new stream.  The context is shared, and a slice request that
+	 * stopped before the end of the frame leaves it mid-stream, as does an
+	 * error thrown out of the loop below.
+	 */
+	ret = ZSTD_initDStream(zstd_dctx);
+	if (ZSTD_isError(ret))
+		elog(ERROR, "could not reset zstd decompression context: %s",
+			 ZSTD_getErrorName(ret));
 
 	inBuf.src = (char *) value + VARHDRSZ_COMPRESSED;
 	inBuf.size = VARSIZE(value) - VARHDRSZ_COMPRESSED;
@@ -388,23 +407,17 @@ zstd_decompress_datum_slice(const struct varlena *value, int32 slicelength)
 	while (inBuf.pos < inBuf.size &&
 		   outBuf.pos < outBuf.size)
 	{
-		size_t ret;
-
-		ret = ZSTD_decompressStream(dctx, &outBuf, &inBuf);
+		ret = ZSTD_decompressStream(zstd_dctx, &outBuf, &inBuf);
 
 		if (ZSTD_isError(ret))
-		{
-			ZSTD_freeDCtx(dctx);
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_CORRUPTED),
 					 errmsg_internal("compressed zstd data is corrupt: %s",
 									 ZSTD_getErrorName(ret))));
-		}
 	}
 
 	Assert(outBuf.size == slicelength && outBuf.pos == slicelength);
 	SET_VARSIZE(result, outBuf.pos + VARHDRSZ);
-	ZSTD_freeDCtx(dctx);
 
 	return result;
 #endif
