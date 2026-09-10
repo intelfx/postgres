@@ -23,6 +23,7 @@
 #include "access/detoast.h"
 #include "access/toast_compression.h"
 #include "common/pg_lzcompress.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
 #include "varatt.h"
 
@@ -303,7 +304,7 @@ zstd_compress_datum(const struct varlena *value)
 
 	len = ZSTD_compressCCtx(zstd_cctx, (char *) tmp + VARHDRSZ_COMPRESSED,
 	                        max_size, VARDATA_ANY(value), valsize,
-	                        ZSTD_CLEVEL_DEFAULT);
+	                        compression_zstd_level);
 	if (ZSTD_isError(len))
 		elog(ERROR, "zstd compression failed: %s",
 			 ZSTD_getErrorName(len));

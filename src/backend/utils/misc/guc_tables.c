@@ -25,6 +25,9 @@
 #ifdef HAVE_SYSLOG
 #include <syslog.h>
 #endif
+#ifdef USE_ZSTD
+#include <zstd.h>
+#endif
 
 #include "access/commit_ts.h"
 #include "access/gin.h"
@@ -111,6 +114,16 @@ extern bool trace_syncscan;
 #endif
 #ifdef DEBUG_BOUNDED_SORT
 extern bool optimize_bounded_sort;
+#endif
+
+/*
+ * Default for compression_zstd_level.  The GUC exists even in builds without
+ * zstd support, so a value has to be available there as well.
+ */
+#ifdef USE_ZSTD
+#define ZSTD_COMPRESSION_LEVEL_DEFAULT	ZSTD_CLEVEL_DEFAULT
+#else
+#define ZSTD_COMPRESSION_LEVEL_DEFAULT	3
 #endif
 
 /*
@@ -561,6 +574,12 @@ int			tcp_keepalives_idle;
 int			tcp_keepalives_interval;
 int			tcp_keepalives_count;
 int			tcp_user_timeout;
+
+/*
+ * Shared by TOAST compression and WAL full-page image compression, neither of
+ * which owns it.
+ */
+int			compression_zstd_level = ZSTD_COMPRESSION_LEVEL_DEFAULT;
 
 /*
  * SSL renegotiation was been removed in PostgreSQL 9.5, but we tolerate it
@@ -3574,6 +3593,19 @@ struct config_int ConfigureNamesInt[] =
 		&pgstat_track_activity_query_size,
 		1024, 100, 1048576,
 		NULL, NULL, NULL
+	},
+
+	{
+		{"compression_zstd_level", PGC_SUSET, CLIENT_CONN_STATEMENT,
+			gettext_noop("Sets the compression level used by zstd compression."),
+			gettext_noop("This applies to TOAST compression and to the compression "
+						 "of full-page images in WAL.  Zero selects the level "
+						 "libzstd considers its default.  The accepted range is "
+						 "determined by libzstd.")
+		},
+		&compression_zstd_level,
+		ZSTD_COMPRESSION_LEVEL_DEFAULT, INT_MIN, INT_MAX,
+		check_compression_zstd_level, NULL, NULL
 	},
 
 	{

@@ -18,6 +18,10 @@
 
 #include <ctype.h>
 
+#ifdef USE_ZSTD
+#include <zstd.h>
+#endif
+
 #include "access/htup_details.h"
 #include "access/parallel.h"
 #include "access/xact.h"
@@ -1252,6 +1256,26 @@ check_ssl(bool *newval, void **extra, GucSource source)
 	if (*newval)
 	{
 		GUC_check_errmsg("SSL is not supported by this build");
+		return false;
+	}
+#endif
+	return true;
+}
+
+/*
+ * GUC check_hook for compression_zstd_level
+ *
+ * The accepted range is whatever the libzstd we are linked against reports,
+ * so it cannot be spelled out in the GUC table.
+ */
+bool
+check_compression_zstd_level(int *newval, void **extra, GucSource source)
+{
+#ifdef USE_ZSTD
+	if (*newval < ZSTD_minCLevel() || *newval > ZSTD_maxCLevel())
+	{
+		GUC_check_errdetail("\"compression_zstd_level\" must be between %d and %d.",
+							ZSTD_minCLevel(), ZSTD_maxCLevel());
 		return false;
 	}
 #endif

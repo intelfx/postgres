@@ -38,6 +38,7 @@
 #include "replication/origin.h"
 #include "storage/bufmgr.h"
 #include "storage/proc.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
 
 /*
@@ -1005,7 +1006,7 @@ XLogCompressBackupBlock(char *page, uint16 hole_offset, uint16 hole_length,
 			}
 
 			len = ZSTD_compressCCtx(zstd_cctx, dest, COMPRESS_BUFSIZE,
-			                        source, orig_len, ZSTD_CLEVEL_DEFAULT);
+			                        source, orig_len, compression_zstd_level);
 			if (ZSTD_isError(len))
 				len = -1;		/* failure */
 #else
