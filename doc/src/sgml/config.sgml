@@ -9835,6 +9835,41 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-compression-zstd-level" xreflabel="compression_zstd_level">
+      <term><varname>compression_zstd_level</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>compression_zstd_level</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Sets the compression level used whenever data is compressed with
+        <literal>zstd</literal>.  This covers
+        <link linkend="storage-toast">TOAST</link> compression of columns
+        using the <literal>zstd</literal> method, as well as compression of
+        full-page images in <acronym>WAL</acronym> when
+        <xref linkend="guc-wal-compression"/> is set to <literal>zstd</literal>.
+       </para>
+
+       <para>
+        Higher levels compress more at the cost of more <acronym>CPU</acronym>
+        time and memory; negative levels trade compression ratio for speed.
+        Zero selects the level that <application>libzstd</application>
+        considers its default, which is also the default of this parameter.
+        The accepted range is whatever the
+        <application>libzstd</application> in use reports, typically
+        <literal>-131072</literal> to <literal>22</literal>.  Only superusers
+        and users with the appropriate <literal>SET</literal> privilege can
+        change this setting.
+       </para>
+
+       <para>
+        This parameter has no effect if <productname>PostgreSQL</productname>
+        was not compiled with <option>--with-zstd</option>.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-temp-tablespaces" xreflabel="temp_tablespaces">
       <term><varname>temp_tablespaces</varname> (<type>string</type>)
       <indexterm>
