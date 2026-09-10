@@ -112,6 +112,22 @@ SELECT * FROM verify_heapam('test_partition',
 							startblock := NULL,
 							endblock := NULL);
 
+-- Check that TOAST pointers are not reported as corrupt.  check_toast
+-- validates the compression method recorded in the pointer, so exercise it
+-- against a zstd column where the build has zstd; the other methods reach the
+-- same code path.
+SELECT enumvals @> '{zstd}' AS has_zstd FROM pg_settings
+  WHERE name = 'default_toast_compression' \gset
+CREATE TABLE heaptest_toast (a text);
+\if :has_zstd
+ALTER TABLE heaptest_toast ALTER COLUMN a SET COMPRESSION zstd;
+\endif
+INSERT INTO heaptest_toast
+  SELECT string_agg(encode(sha256(g::text::bytea), 'hex'), '')
+  FROM generate_series(1, 3000) g;
+SELECT * FROM verify_heapam(relation := 'heaptest_toast',
+							check_toast := true);
+
 -- Check that indexes are rejected
 CREATE INDEX test_index ON test_partition (a);
 SELECT * FROM verify_heapam('test_index',
@@ -140,6 +156,7 @@ SELECT * FROM verify_heapam('test_foreign_table',
 
 -- cleanup
 DROP TABLE heaptest;
+DROP TABLE heaptest_toast;
 DROP TABLESPACE regress_test_stats_tblspc;
 DROP TABLE test_partition;
 DROP TABLE test_partitioned;
