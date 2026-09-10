@@ -23,6 +23,7 @@
 #include "access/detoast.h"
 #include "access/toast_compression.h"
 #include "common/pg_lzcompress.h"
+#include "utils/memutils.h"
 #include "varatt.h"
 
 /* GUC */
@@ -268,8 +269,8 @@ zstd_compress_datum(const struct varlena *value)
 	return NULL;				/* keep compiler quiet */
 #else
 	int32		valsize;
-	int32		len;
-	int32		max_size;
+	size_t		len;
+	size_t		max_size;
 	struct varlena *tmp = NULL;
 
 	valsize = VARSIZE_ANY_EXHDR(value);
@@ -287,8 +288,15 @@ zstd_compress_datum(const struct varlena *value)
 	/*
 	 * Figure out the maximum possible size of the ZSTD output, add the bytes
 	 * that will be needed for varlena overhead, and allocate that amount.
+	 *
+	 * For inputs close to the varlena size limit the worst case exceeds what
+	 * palloc() accepts.  Report those as incompressible instead of failing
+	 * the insert; the caller then stores the value uncompressed.
 	 */
 	max_size = ZSTD_compressBound(valsize);
+	if (max_size > MaxAllocSize - VARHDRSZ_COMPRESSED)
+		return NULL;
+
 	tmp = (struct varlena *) palloc(max_size + VARHDRSZ_COMPRESSED);
 
 	len = ZSTD_compressCCtx(zstd_cctx, (char *) tmp + VARHDRSZ_COMPRESSED,
@@ -299,7 +307,7 @@ zstd_compress_datum(const struct varlena *value)
 			 ZSTD_getErrorName(len));
 
 	/* data is incompressible so just free the memory and return NULL */
-	if (len > valsize)
+	if (len > (size_t) valsize)
 	{
 		pfree(tmp);
 		return NULL;
