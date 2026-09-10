@@ -332,21 +332,34 @@ zstd_decompress_datum(const struct varlena *value)
 	return NULL;				/* keep compiler quiet */
 #else
 	int32		rawsize;
+	size_t		decompsize;
 	struct varlena *result;
 
+	rawsize = VARDATA_COMPRESSED_GET_EXTSIZE(value);
+
 	/* allocate memory for the uncompressed data */
-	result = (struct varlena *) palloc(VARDATA_COMPRESSED_GET_EXTSIZE(value) + VARHDRSZ);
+	result = (struct varlena *) palloc(rawsize + VARHDRSZ);
 
 	/* decompress the data */
-	rawsize = ZSTD_decompress(VARDATA(result),
-							  VARDATA_COMPRESSED_GET_EXTSIZE(value),
-							  (char *) value + VARHDRSZ_COMPRESSED,
-							  VARSIZE(value) - VARHDRSZ_COMPRESSED);
-	if (ZSTD_isError(rawsize))
+	decompsize = ZSTD_decompress(VARDATA(result),
+								 rawsize,
+								 (char *) value + VARHDRSZ_COMPRESSED,
+								 VARSIZE(value) - VARHDRSZ_COMPRESSED);
+	if (ZSTD_isError(decompsize))
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_CORRUPTED),
 				 errmsg_internal("compressed zstd data is corrupt: %s",
-								 ZSTD_getErrorName(rawsize))));
+								 ZSTD_getErrorName(decompsize))));
+
+	/*
+	 * A frame that decodes to fewer bytes than the varlena header promises is
+	 * corrupt; returning the short result would silently truncate the value.
+	 */
+	if (decompsize != (size_t) rawsize)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg_internal("compressed zstd data is corrupt: expected %d bytes, got %zu",
+								 rawsize, decompsize)));
 
 	SET_VARSIZE(result, rawsize + VARHDRSZ);
 
@@ -414,9 +427,22 @@ zstd_decompress_datum_slice(const struct varlena *value, int32 slicelength)
 					(errcode(ERRCODE_DATA_CORRUPTED),
 					 errmsg_internal("compressed zstd data is corrupt: %s",
 									 ZSTD_getErrorName(ret))));
+
+		/* end of frame reached before the requested prefix was complete */
+		if (ret == 0)
+			break;
 	}
 
-	Assert(outBuf.size == slicelength && outBuf.pos == slicelength);
+	/*
+	 * Callers never ask for more than the datum holds, so a short frame means
+	 * the stored data is corrupt.
+	 */
+	if (outBuf.pos < outBuf.size)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg_internal("compressed zstd data is corrupt: expected at least %d bytes, got %zu",
+								 slicelength, outBuf.pos)));
+
 	SET_VARSIZE(result, outBuf.pos + VARHDRSZ);
 
 	return result;
